@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parent.parent
 MAIN = REPO / "main.py"
@@ -68,6 +69,37 @@ class TestEntry(unittest.TestCase):
             self.assertEqual(run_main(out).returncode, 0)
             mode = stat.S_IMODE((out / "entry.txt").stat().st_mode)
             self.assertEqual(mode, 0o644)
+
+    def test_succeeds_when_dir_chmod_fails(self):
+        """Regression: the grader runs as a different user against a
+        root-owned output dir, so chmod on the directory raises
+        PermissionError — the program must still write entry.txt."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("toaster_main", MAIN)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        real_chmod = os.chmod
+
+        def chmod_side_effect(path, mode):
+            if Path(path) == Path(self._out_dir):
+                raise PermissionError("cannot chmod root-owned dir")
+            return real_chmod(path, mode)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._out_dir = tmp
+            old = os.environ.get("MAKEFUN_OUTPUT_DIR")
+            os.environ["MAKEFUN_OUTPUT_DIR"] = tmp
+            try:
+                with mock.patch.object(os, "chmod", side_effect=chmod_side_effect):
+                    module.main()
+            finally:
+                if old is None:
+                    os.environ.pop("MAKEFUN_OUTPUT_DIR", None)
+                else:
+                    os.environ["MAKEFUN_OUTPUT_DIR"] = old
+            self.assertEqual((Path(tmp) / "entry.txt").read_bytes(),
+                             EXPECTED.encode("utf-8"))
 
     def test_no_trailing_newline(self):
         """No trailing newline: the judge reads exactly the bytes written,

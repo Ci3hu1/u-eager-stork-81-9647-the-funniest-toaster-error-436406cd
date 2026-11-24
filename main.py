@@ -26,7 +26,13 @@ def main() -> None:
         raise SystemExit("line must be exactly one line")
     out_dir = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
     out_dir.mkdir(parents=True, exist_ok=True)
-    os.chmod(out_dir, 0o755)
+    # The grader runs this as a different user against a root-owned
+    # output dir: chmod on the directory raises PermissionError there,
+    # so tolerate it — the file chmod below is what the collector needs.
+    try:
+        os.chmod(out_dir, 0o755)
+    except OSError:
+        pass
     dest = out_dir / "entry.txt"
     dest.write_text(LINE, encoding="utf-8")
     # make.fun collects outputs as another user: the file must be readable
